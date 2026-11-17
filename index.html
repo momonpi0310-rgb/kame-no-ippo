@@ -1589,7 +1589,7 @@
             <input id="chatInput" type="text" maxlength="200" placeholder="カメに話しかけてみてね" autocomplete="off" aria-label="カメへのメッセージ" />
             <button type="submit" class="chat-send">送る</button>
           </form>
-          <p class="chat-note">会話はこの画面の中だけに残ります。閉じると消えるよ。</p>
+          <p class="chat-note">おはなしの返事はAIが作ることがあります。いちばん重い言葉のときだけ、今まで通りの固定の返事です。会話はこの画面の中だけに残ります。閉じると消えるよ。</p>
         </div>
       </section>
 
@@ -2477,7 +2477,7 @@
           el.addEventListener("click", function () { showView("home", true); });
         });
 
-        /* ---------- talk with turtle (on-device, rule-based) ---------- */
+        /* ---------- talk with turtle (rule-based safety + AI relay) ---------- */
         var chatLog = document.getElementById("chatLog");
         var chatInput = document.getElementById("chatInput");
         var chatForm = document.getElementById("chatForm");
@@ -2526,7 +2526,9 @@
            一人称は「カメ」。返事は短文1〜2文（最強段階でも最大3短文）。
            「……」の間と、ひらがなの柔らかさで返す。
            ミソは「なるべく短文で、どれだけユーモアと癒しが詰まっているか」。
-           会話は端末の中で組み立てるだけ。外に送らず、保存もしない。 */
+           安全判定（最強・重い言葉・関係の不安・記録）は端末の中で判定し、
+           固定返事を出す。それ以外の日常会話だけ、中継API経由でAIの返事を
+           使うことがある。会話は保存しない（この画面の中だけ）。 */
         /* 会話の状態（段階式）：
            stage 0 ふだん
            stage 1 いっぱいいっぱい：共感・肯定・そばにいることだけ。提案・促しは出さない
@@ -3187,23 +3189,140 @@
           return fb;
         }
         /* == KAME-ENGINE-END == */
+        /* ===== AI中継（カメトーク） =====
+           安全判定はページ側に残す：最強ティア・重い言葉・関係の不安の
+           固定返事・記録の問い合わせはAIに送らず、今まで通り固定返事を出す。
+           それ以外の日常会話・軽い相談だけを中継APIに送る。
+           AIの返事は事後チェックを通った場合だけ表示し、失敗・タイムアウト
+           （12秒）・チェック不合格のときは既存のルール返事に切り替える。
+           返事が来ない状態は作らない。会話履歴はこの画面の中だけに持ち、
+           保存しない。 */
+        var KAME_TALK_API = "https://kame-no-ippo.vercel.app/api/kame-talk";
+        var KAME_TALK_TOKEN = "kame-ippo-2026";
+        var KAME_TALK_TIMEOUT_MS = 12000;
+        var kameHistory = [];
+        function kamePushHistory(who, text) {
+          if (!text) return;
+          kameHistory.push({ who: who, text: text });
+          if (kameHistory.length > 40) kameHistory = kameHistory.slice(-40);
+        }
+        function kameIsFixedCase(text) {
+          /* 最強ティア */
+          if (/死にたい|しにたい|死のう|死ぬ|死んでしま|自殺|じさつ|自傷|自分を傷つけ|消えたい|いなくなりたい|生きていたくない|生きる意味|生きてる意味|生きている意味|もう無理|もうむり|限界/.test(text)) return true;
+          /* 強めのしんどさ */
+          if (/もうだめ|もうダメ|耐えられない|たえられない|苦しすぎ|パニック|発作|助けて|たすけて|どうしたらいいか分からな/.test(text)) return true;
+          /* 関係の不安・試し言葉（専用プールがあるもの） */
+          try { if (kameRelationReply(text)) return true; } catch (e) {}
+          /* 記録の問い合わせ */
+          if (/今日の記録|きょうの記録|何歩|なんぼ|何個チェック|進んだ/.test(text)) return true;
+          /* スタッフを呼ぶことへの不安 */
+          if (/呼ぶ勇気|呼べない|呼べな|勇気ない|勇気がない|勇気がな/.test(text)) return true;
+          /* 重い言葉・重い気持ちの話題 */
+          if (/思い出|フラッシュバック|落ち着か|落ち着けな|ざわざわ|そわそわ|ドキドキし|寂しい|さみしい|さびしい|ひとりぼっち|一人ぼっち|繰り返し|繰りかえし|くりかえし|繰り返す|毎日つら|毎日辛|毎日しんど|ずっとつら|ずっと辛|ずっとしんど|終わらない|おわらない|つらい|辛い|しんどい|泣きたい|泣いて|泣いちゃ|泣ける|泣きそう|涙|なみだ|悲しい|かなしい|落ち込|不安|怖い|こわい|自分が悪い|私が悪い|自分のせい|私のせい|自分がだめ|自分がダメ|情けな|迷惑をかけ|迷惑かけ|眠れ|ねむれ|寝られ|ねられ|寝つけ|眠れない|食欲がない|食欲ない|食べられな|食べたくない|たべられない/.test(text)) return true;
+          /* なだめ中の拒否・短い「無理／できない」 */
+          if (kameJustTipped > 0 && /無理|できない|出来ない|いやだ|嫌だ|やだ|したくない|いいや|いらない|やめとく|やめておく/.test(text)) return true;
+          if (kameSootheLeft > 0 && /^(もう)?無理|できない|出来ない|むり|いやだ|嫌だ|やだ|どうしよう|分からない|わからない/.test(text)) return true;
+          if (/^(もう)?(無理|むり|できない|出来ない)[。．！!…]*$/.test(text)) return true;
+          return false;
+        }
+        function kameAiReplyOk(reply) {
+          if (typeof reply !== "string") return false;
+          var t = reply.trim();
+          if (!t) return false;
+          if (t.length > 120) return false;
+          if (t.split("\n").length > 3) return false;
+          /* ホットライン・電話相談への案内は出さない */
+          if (/ホットライン|電話相談|相談窓口|相談ダイヤル|いのちの電話|よりそい|チャイルドライン|電話番号|0120|0570/.test(t)) return false;
+          if (/電話(して|をかけ|で相談)/.test(t)) return false;
+          /* 命令口調が強いものは出さない */
+          if (/しなさい|しろ[。！!]|せよ[。！!]|するな[。！!]|やめろ|やめなさい|行きなさい|行け[。！!]|来い[。！!]|飲みなさい|食べなさい|寝なさい|起きなさい|呼びなさい|今すぐ/.test(t)) return false;
+          if (/必ず[^。]{0,12}(して|しなさい|呼ん|行)/.test(t)) return false;
+          if (/絶対に[^。]{0,12}(して|しなさい)/.test(t)) return false;
+          return true;
+        }
+        function fetchKameAi(text, historySnapshot, sootheFlag) {
+          if (typeof fetch !== "function") return Promise.resolve(null);
+          var controller = null;
+          var timer = null;
+          var opts = {
+            method: "POST",
+            headers: { "Content-Type": "application/json", "X-Kame-Token": KAME_TALK_TOKEN },
+            body: JSON.stringify({ text: text, history: historySnapshot, name: userName || "", soothe: !!sootheFlag })
+          };
+          if (typeof AbortController !== "undefined") {
+            try {
+              controller = new AbortController();
+              opts.signal = controller.signal;
+              timer = setTimeout(function () { try { controller.abort(); } catch (e) {} }, KAME_TALK_TIMEOUT_MS);
+            } catch (e) { controller = null; }
+          }
+          var p;
+          try {
+            p = fetch(KAME_TALK_API, opts).then(function (res) {
+              if (timer) clearTimeout(timer);
+              if (!res || !res.ok) return null;
+              return res.json().then(function (data) {
+                if (!data || typeof data.reply !== "string") return null;
+                return data.reply;
+              }).catch(function () { return null; });
+            }).catch(function () {
+              if (timer) clearTimeout(timer);
+              return null;
+            });
+          } catch (e) {
+            if (timer) clearTimeout(timer);
+            return Promise.resolve(null);
+          }
+          if (!controller) {
+            return Promise.race([p, new Promise(function (resolve) {
+              setTimeout(function () { resolve(null); }, KAME_TALK_TIMEOUT_MS);
+            })]);
+          }
+          return p;
+        }
         function sendChat(raw) {
           var text = (raw == null ? chatInput.value : raw).trim();
-          if (!text || chatBusy) return;
+          if (!text) return;
+          /* AIに渡す履歴は、この発言より前の直近10ターンだけ */
+          var historySnapshot = kameHistory.slice(-10).map(function (h) { return { who: h.who, text: h.text }; });
+          var sootheFlag = (kameSootheLeft > 0 || kameStage === 1 || kameStage === 2);
+          var fixedCase = kameIsFixedCase(text);
           addMsg("me", text);
-          chatInput.value = "";
-          chatBusy = true;
-          var typing = addMsg("turtle", "・・・");
+          if (raw == null) chatInput.value = "";
+          /* ルール返事は1回だけ組み立てる（エンジンの状態遷移もここで1回だけ）。
+             固定ケースではこれがそのまま答えになり、AIケースでは
+             失敗時・チェック不合格時のフォールバックになる */
+          var ruleReply = turtleReply(text);
+          /* 考え中表示：入力欄は無効化しないので、待っている間も
+             次の言葉を打てる（ブロックしすぎない） */
+          var typing = addMsg("turtle", fixedCase ? "・・・" : "……考え中");
           typing.querySelector(".bubble").classList.add("typing");
-          var reply = turtleReply(text);
-          var delay = 900 + Math.random() * 600;
-          setTimeout(function () {
-            typing.querySelector(".bubble").classList.remove("typing");
-            typing.querySelector(".bubble").textContent = reply;
+          var finished = false;
+          function finish(finalReply) {
+            if (finished) return;
+            finished = true;
+            var bubble = typing.querySelector(".bubble");
+            if (bubble) {
+              bubble.classList.remove("typing");
+              bubble.textContent = finalReply;
+            }
             scrollChatBottom();
+            kamePushHistory("user", text);
+            kamePushHistory("kame", finalReply);
             chatBusy = false;
-            chatInput.focus();
-          }, delay);
+            if (!chatInput.value) { try { chatInput.focus(); } catch (e) {} }
+          }
+          if (fixedCase) {
+            chatBusy = true;
+            var delay = 900 + Math.random() * 600;
+            setTimeout(function () { finish(ruleReply); }, delay);
+            return;
+          }
+          chatBusy = true;
+          fetchKameAi(text, historySnapshot, sootheFlag).then(function (aiReply) {
+            if (aiReply && kameAiReplyOk(aiReply)) finish(aiReply.trim());
+            else finish(ruleReply);
+          }).catch(function () { finish(ruleReply); });
         }
         chatForm.addEventListener("submit", function (ev) { ev.preventDefault(); sendChat(); });
         document.querySelectorAll("[data-quick]").forEach(function (b) {
@@ -3273,7 +3392,9 @@
           var who = userName ? userName + "さん" : "";
           var first = who ? g + "、" + who + "。……カメは、かめさん。ここにいるよ。"
                           : g + "。……カメは、かめさん。ここにいるよ。";
-          addMsg("turtle", first + "\n短くても大丈夫。「つかれた」だけでも、いいよ。");
+          var greetText = first + "\n短くても大丈夫。「つかれた」だけでも、いいよ。";
+          addMsg("turtle", greetText);
+          kamePushHistory("kame", greetText);
         }
 
         /* ---------- mogu-mogu monster: eats the paper, keeps nothing ---------- */
