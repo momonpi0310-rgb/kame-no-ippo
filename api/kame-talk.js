@@ -28,16 +28,15 @@ const SYSTEM_PROMPT = `あなたは「カメ」という名前の、小さなカ
 
 出力は、カメの返事の本文だけ。前置き、説明、引用符は付けない。`;
 
-const ALLOWED_ORIGINS = [
-  'https://momonpi0310-rgb.github.io',
-  'https://kame-no-ippo.vercel.app',
-];
 const SOFT_TOKEN = 'kame-ippo-2026';
 
 module.exports = async (req, res) => {
   const origin = req.headers.origin || '';
-  if (ALLOWED_ORIGINS.includes(origin)) {
+  if (origin) {
+    // Museのカード版・GitHub Pages・Vercel自身など、開く場所が複数あるため
+    // Originは反射する。実際の門番は X-Kame-Token と残高上限（$5・自動チャージなし）。
     res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Kame-Token');
