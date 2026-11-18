@@ -3,13 +3,7 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content" />
-    <meta name="color-scheme" content="light" />
-    <meta name="robots" content="noindex, nofollow" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
-    <meta name="mobile-web-app-capable" content="yes" />
-    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
-    <meta name="apple-mobile-web-app-title" content="カメの一歩" />
-    <meta name="theme-color" content="#fff6fa" />
+    <meta name="color-scheme" content="light" /><meta name="robots" content="noindex, nofollow"><meta name="apple-mobile-web-app-capable" content="yes"><meta name="mobile-web-app-capable" content="yes"><meta name="apple-mobile-web-app-status-bar-style" content="default"><meta name="apple-mobile-web-app-title" content="カメの一歩"><meta name="theme-color" content="#fff6fa">
     <link rel="icon" href="data:," />
     <title>カメの一歩</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -2081,24 +2075,36 @@
             els.speech.textContent = "今日は " + today.length + "歩 すすんだね。すごいじゃん。";
           }
 
-          /* turtle position: cycle of 10 steps (unchanged) */
-          var courseLen = 10;
-          var inCourse = total % courseLen;
-          var x = 84 + (inCourse / courseLen) * 400;
+          /* 今日の小道 (today's little path): the home walk is paced by
+             TODAY's checks, not the all-time total. One check today = one
+             step along the lane: the turtle stands one stone further on,
+             the stones she has passed turn warm with a sparkle, and a
+             small footprint is left on each one. The lane loops — after
+             the last stone she simply starts the little path again, and
+             the footprints of the full lane stay as they are. No goal,
+             no finish line, nothing counted down or remaining. A new day
+             means today's count is 0 again, so she is back at the start
+             of the lane; every record itself stays right where it was.
+             The all-time journey scenery below still melts with the
+             total, exactly as before. */
+          var courseLen = 12;
+          var lapPos = today.length % courseLen;
+          var walked = Math.min(today.length, courseLen);
+          var x = 84 + (lapPos / courseLen) * 480;
           els.turtle.setAttribute("transform", "translate(" + x + ",262)");
 
           /* scenery: melts through the journey's legs as the total grows */
           updateJourney(total);
 
           /* stepping stones: one connected little stone path along the lane.
-             Each stone sits where a footprint used to be (same x rhythm as the
-             turtle's walk), so step positions and counts are unchanged. */
+             The stones she has already stepped on TODAY are the warm ones;
+             each of them also keeps a small footprint of hers. */
           var stoneFill = ["#fdf3e3", "#fdeef2", "#f2ecfd", "#fdf6e0", "#eef7ee"];
           var prints = "";
           for (var si = 0; si < courseLen; si++) {
-            var sx = 60 + (si / courseLen) * 400;
+            var sx = 60 + (si / courseLen) * 480;
             var sy = 278 + (si % 2 === 0 ? -3 : 3);
-            var stepped = si < inCourse;
+            var stepped = si < walked;
             var sfill = stepped ? "#f3d9c2" : stoneFill[si % stoneFill.length];
             var rw = 25 + (si % 3) * 2, rh = 10.5 + (si % 2) * 1.5;
             prints += '<g transform="rotate(' + (si % 2 === 0 ? -4 : 3) + ' ' + sx + ' ' + sy + ')">';
@@ -2108,6 +2114,9 @@
             if (si % 3 === 1) prints += '<path d="M' + (sx + 2) + ' ' + (sy - 4) + ' q4 3 2 7" fill="none" stroke="#c9a582" stroke-width="1.1" opacity="0.7" stroke-linecap="round"/>';
             prints += '<circle cx="' + (sx + rw * 0.45) + '" cy="' + (sy + 2) + '" r="1.4" fill="#d9b48f" opacity="0.8"/><circle cx="' + (sx - rw * 0.1) + '" cy="' + (sy + rh * 0.45) + '" r="1.1" fill="#d9b48f" opacity="0.7"/>';
             if (stepped) prints += '<path transform="translate(' + (sx - 6) + ',' + (sy - 6) + ') scale(0.5)" d="M12 1 L14.2 9.8 L23 12 L14.2 14.2 L12 23 L9.8 14.2 L1 12 L9.8 9.8 Z" fill="#e87ea6" opacity="0.75"/>';
+            /* her footprint, left on the front edge of each stone she
+               stepped on today, so today's steps stay visible behind her */
+            if (stepped) prints += '<ellipse cx="' + (sx - 3) + '" cy="' + (sy + rh * 0.72) + '" rx="5.2" ry="2.5" fill="#d89a6a" opacity="0.55" transform="rotate(' + (si % 2 === 0 ? -9 : 7) + ' ' + (sx - 3) + ' ' + (sy + rh * 0.72) + ')"/>';
             prints += '</g>';
           }
           els.prints.innerHTML = prints;
