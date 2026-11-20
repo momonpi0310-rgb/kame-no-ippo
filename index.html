@@ -553,7 +553,15 @@
         background: var(--pink-deep); color: #fff; font-weight: 800; font-size: 1rem; box-shadow: var(--shadow-sm);
       }
       .chat-send:active { transform: scale(0.97); }
-      .chat-note { flex: none; padding: 0 10px 10px; margin: 0; font-size: 0.78rem; color: var(--ink-soft); background: var(--card); border-radius: 0 0 22px 22px; }
+      .chat-note { flex: none; padding: 0 10px 6px; margin: 0; font-size: 0.78rem; color: var(--ink-soft); background: var(--card); }
+      .chat-tools { flex: none; display: flex; justify-content: flex-end; padding: 0 10px 10px; background: var(--card); border-radius: 0 0 22px 22px; }
+      .chat-clear {
+        border: none; background: transparent; color: var(--ink-soft); font-weight: 700;
+        text-decoration: underline; text-underline-offset: 4px; padding: 6px 8px; min-height: 36px; font-size: 0.78rem;
+      }
+      .chat-clear.confirm {
+        background: var(--pink-deep); color: #fff; text-decoration: none; border-radius: 999px; padding: 6px 14px;
+      }
       /* ---------- chat input bar: always reachable on a phone ----------
          On small screens the bar sticks to the bottom of the visible area
          while scrolling. While the on-screen keyboard is open (body.chat-kb,
@@ -578,7 +586,7 @@
           z-index: 75; border: 2px solid var(--line); border-radius: 18px;
           box-shadow: var(--shadow);
         }
-        body.chat-kb .chat-note { padding-bottom: 88px; }
+        body.chat-kb .chat-tools { padding-bottom: 88px; }
       }
 
       /* ---------- mogu-mogu corner: paper-eating monster ---------- */
@@ -1583,7 +1591,8 @@
             <input id="chatInput" type="text" maxlength="200" placeholder="カメに話しかけてみてね" autocomplete="off" aria-label="カメへのメッセージ" />
             <button type="submit" class="chat-send">送る</button>
           </form>
-          <p class="chat-note">おはなしの返事はAIが作ることがあります。いちばん重い言葉のときだけ、今まで通りの固定の返事です。会話はこの画面の中だけに残ります。閉じると消えるよ。</p>
+          <p class="chat-note">おはなしの返事はAIが作ることがあります。いちばん重い言葉のときだけ、今まで通りの固定の返事です。会話はこの端末の中にだけ残るよ。消したいときは『会話を消す』ボタンで消せるよ。</p>
+          <div class="chat-tools"><button type="button" class="chat-clear" id="chatClearBtn">会話を消す</button></div>
         </div>
       </section>
 
@@ -2537,7 +2546,7 @@
            ミソは「なるべく短文で、どれだけユーモアと癒しが詰まっているか」。
            安全判定（最強・重い言葉・関係の不安・記録）は端末の中で判定し、
            固定返事を出す。それ以外の日常会話だけ、中継API経由でAIの返事を
-           使うことがある。会話は保存しない（この画面の中だけ）。 */
+           使うことがある。会話はこの端末の中にだけ保存する。 */
         /* 会話の状態（段階式）：
            stage 0 ふだん
            stage 1 いっぱいいっぱい：共感・肯定・そばにいることだけ。提案・促しは出さない
@@ -3204,16 +3213,41 @@
            それ以外の日常会話・軽い相談だけを中継APIに送る。
            AIの返事は事後チェックを通った場合だけ表示し、失敗・タイムアウト
            （12秒）・チェック不合格のときは既存のルール返事に切り替える。
-           返事が来ない状態は作らない。会話履歴はこの画面の中だけに持ち、
-           保存しない。 */
+           返事が来ない状態は作らない。会話履歴はこの端末の中にだけ
+           保存し（localStorage、最新100件まで）、次に開いたときに復元する。 */
         var KAME_TALK_API = "https://kame-no-ippo.vercel.app/api/kame-talk";
         var KAME_TALK_TOKEN = "kame-ippo-2026";
         var KAME_TALK_TIMEOUT_MS = 12000;
+        var TALK_KEY = "kame-no-ippo-talk-v1";
         var kameHistory = [];
+        function persistTalk() {
+          try {
+            localStorage.setItem(TALK_KEY, JSON.stringify(kameHistory.slice(-100)));
+          } catch (e) {}
+        }
+        function loadPersistedTalk() {
+          try {
+            var raw = localStorage.getItem(TALK_KEY);
+            if (!raw) return [];
+            var arr = JSON.parse(raw);
+            if (!Array.isArray(arr)) return [];
+            var out = [];
+            arr.forEach(function (h) {
+              if (!h || typeof h.text !== "string" || !h.text) return;
+              var who = h.who;
+              if (who === "me") who = "user";
+              if (who === "turtle") who = "kame";
+              if (who !== "user" && who !== "kame") return;
+              out.push({ who: who, text: h.text });
+            });
+            return out.slice(-100);
+          } catch (e) { return []; }
+        }
         function kamePushHistory(who, text) {
           if (!text) return;
           kameHistory.push({ who: who, text: text });
-          if (kameHistory.length > 40) kameHistory = kameHistory.slice(-40);
+          if (kameHistory.length > 100) kameHistory = kameHistory.slice(-100);
+          persistTalk();
         }
         function kameIsFixedCase(text) {
           /* 最強ティア */
@@ -3391,11 +3425,21 @@
             if (document.body.classList.contains("chat-kb")) syncKeyboardVars();
           });
         }
-        /* 入室時：トーク画面を開いたら、かめさんから先に短く話しかける（名前があれば呼ぶ） */
+        /* 入室時：保存済みの会話があれば復元し、なければ、かめさんから
+           先に短く話しかける（名前があれば呼ぶ） */
         var greeted = false;
         function greetTurtle() {
           if (greeted) return;
           greeted = true;
+          var saved = loadPersistedTalk();
+          if (saved.length) {
+            kameHistory = saved.slice(-100);
+            saved.forEach(function (h) {
+              addMsg(h.who === "user" ? "me" : "turtle", h.text);
+            });
+            scrollChatBottom();
+            return;
+          }
           var h = new Date().getHours();
           var g = h < 11 ? "おはよう" : h >= 17 ? "こんばんは" : "やあ";
           var who = userName ? userName + "さん" : "";
@@ -3404,6 +3448,40 @@
           var greetText = first + "\n短くても大丈夫。「つかれた」だけでも、いいよ。";
           addMsg("turtle", greetText);
           kamePushHistory("kame", greetText);
+        }
+
+        /* ---------- 会話を消す（2段階確認） ---------- */
+        var chatClearBtn = document.getElementById("chatClearBtn");
+        var chatClearArmed = false;
+        var chatClearTimer = null;
+        function resetChatClearBtn() {
+          chatClearArmed = false;
+          if (chatClearTimer) { clearTimeout(chatClearTimer); chatClearTimer = null; }
+          if (chatClearBtn) {
+            chatClearBtn.textContent = "会話を消す";
+            chatClearBtn.classList.remove("confirm");
+          }
+        }
+        if (chatClearBtn) {
+          chatClearBtn.addEventListener("click", function () {
+            if (!chatClearArmed) {
+              chatClearArmed = true;
+              chatClearBtn.textContent = "ほんとうに消す？ もう一度押してね";
+              chatClearBtn.classList.add("confirm");
+              chatClearTimer = setTimeout(resetChatClearBtn, 4000);
+              return;
+            }
+            resetChatClearBtn();
+            try { localStorage.removeItem(TALK_KEY); } catch (e) {}
+            kameHistory = [];
+            chatLog.innerHTML = "";
+            try {
+              kameStage = 0; kameSootheLeft = 0; kameCalmSigns = 0;
+              kameJustTipped = 0; kameLastTopic = "";
+            } catch (e) {}
+            greeted = false;
+            greetTurtle();
+          });
         }
 
         /* ---------- mogu-mogu monster: eats the paper, keeps nothing ---------- */
